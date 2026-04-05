@@ -355,7 +355,7 @@ Rules:
 - Group by INTENT, not by domain. Researching a topic might span GitHub, docs, and blog posts — they all belong together.
 - Be SPECIFIC and descriptive in mission names. "Debugging Next.js Hydration Error" is better than "Web Dev".
 - Every tab must appear in exactly one mission — no tab should be left out. If a tab is genuinely miscellaneous, create a "Miscellaneous" mission for it.
-- Write a concise 1-sentence summary for each mission describing what the user is trying to accomplish.
+- Write a concise 1-sentence summary for each mission. The summary should sound like a casual human note to yourself — never say "the user" or "the reader." Just describe the activity directly. Examples: "Digging into how Anthropic's constitutional AI actually works." or "Setting up Stripe billing for the new project." Keep it conversational and natural.
 
 IMPORTANT — granularity rules:
 - **Individual content pieces get their own mission.** Each YouTube video, blog post, article, or podcast is its own mission — named after the content (e.g., "Watching: Building Is the Easy Part Now | Mike Knoop"). Do NOT lump unrelated content tabs together under a generic name like "Watching AI Videos."

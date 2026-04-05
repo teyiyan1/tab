@@ -290,17 +290,17 @@ router.get('/stats', (req, res) => {
 // Request body:  { tabs: [{ url, title, tabId }] }
 // Response body: { missions: [{ name, summary, tabs: [{ url, title, tabId }] }] }
 // ─────────────────────────────────────────────────────────────────────────────
+// Cache for tab clustering — avoids calling DeepSeek if tabs haven't changed
+let clusterCache = { urlKey: '', result: null };
+
 router.post('/cluster-tabs', async (req, res) => {
   const { tabs } = req.body;
 
-  // Validate input — must provide a non-empty array of tabs
   if (!Array.isArray(tabs) || tabs.length === 0) {
     return res.status(400).json({ error: 'Request body must include a non-empty tabs array.' });
   }
 
-  // Filter out browser-internal pages that the AI shouldn't see:
-  //   chrome://newtab, chrome-extension://, about:blank, etc.
-  // These aren't real browsing content and would confuse the AI.
+  // Filter out browser-internal pages
   const filteredTabs = tabs.filter(tab => {
     const url = tab.url || '';
     return (
@@ -314,15 +314,34 @@ router.post('/cluster-tabs', async (req, res) => {
   });
 
   if (filteredTabs.length === 0) {
-    // All tabs were browser-internal — return empty missions array
-    return res.json({ missions: [] });
+    return res.json({ missions: [], duplicates: [] });
+  }
+
+  // Detect duplicate tabs (same URL open multiple times)
+  const urlCounts = {};
+  for (const tab of filteredTabs) {
+    urlCounts[tab.url] = (urlCounts[tab.url] || 0) + 1;
+  }
+  const duplicates = Object.entries(urlCounts)
+    .filter(([, count]) => count > 1)
+    .map(([url, count]) => {
+      const tab = filteredTabs.find(t => t.url === url);
+      return { url, title: tab.title, count };
+    });
+
+  // Cache key: sorted URLs joined — if tabs haven't changed, skip the API call
+  const urlKey = filteredTabs.map(t => t.url).sort().join('|');
+
+  if (clusterCache.urlKey === urlKey && clusterCache.result) {
+    console.log('[routes] Tab clustering cache hit — skipping DeepSeek call');
+    return res.json({ missions: clusterCache.result, duplicates });
   }
 
   try {
-    // Call DeepSeek to cluster the filtered tabs into missions.
-    // This function lives in clustering.js and returns the missions array directly.
     const missions = await clusterOpenTabs(filteredTabs);
-    res.json({ missions });
+    // Cache the result
+    clusterCache = { urlKey, result: missions };
+    res.json({ missions, duplicates });
   } catch (err) {
     console.error('[routes] POST /cluster-tabs failed:', err.message);
     res.status(500).json({ error: 'Failed to cluster tabs: ' + err.message });

@@ -468,6 +468,7 @@ function renderScatterBar(missionCount) {
    openTabMissions is repopulated every time renderDashboard() runs.
    ---------------------------------------------------------------- */
 let openTabMissions = [];
+let duplicateTabs = [];
 
 
 /* ----------------------------------------------------------------
@@ -538,9 +539,10 @@ async function renderDashboard() {
         const clusterData = await clusterRes.json();
         openTabMissions = (clusterData.missions || []).map((m, i) => ({
           ...m,
-          // Stable ID based on name — survives other missions being closed
           _stableId: m.name.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 40) || `mission-${i}`,
         }));
+        // Store duplicates for rendering
+        duplicateTabs = clusterData.duplicates || [];
       }
     } catch (err) {
       console.warn('[TMC] Could not cluster open tabs:', err);
@@ -556,6 +558,35 @@ async function renderDashboard() {
     openTabsSection.style.display = 'block';
   } else if (openTabsSection) {
     openTabsSection.style.display = 'none';
+  }
+
+  // ── Duplicate tabs warning ──────────────────────────────────────────────
+  let dupeSection = document.getElementById('duplicatesBanner');
+  if (duplicateTabs.length > 0) {
+    if (!dupeSection) {
+      dupeSection = document.createElement('div');
+      dupeSection.id = 'duplicatesBanner';
+      dupeSection.className = 'nudge-banner';
+      dupeSection.style.borderColor = 'rgba(200, 113, 58, 0.2)';
+      dupeSection.style.background = 'linear-gradient(135deg, rgba(200, 113, 58, 0.04), rgba(200, 113, 58, 0.08))';
+      const openTabsEl = document.getElementById('openTabsSection');
+      if (openTabsEl) openTabsEl.after(dupeSection);
+    }
+    const totalDupes = duplicateTabs.reduce((s, d) => s + d.count - 1, 0);
+    dupeSection.style.display = 'flex';
+    dupeSection.innerHTML = `
+      <div class="nudge-icon" style="background: rgba(200, 113, 58, 0.1);">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="var(--accent-amber)" style="width:18px;height:18px">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.5a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 0 1-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H9.75" />
+        </svg>
+      </div>
+      <div class="nudge-text">
+        <strong>${totalDupes} duplicate tab${totalDupes !== 1 ? 's' : ''}</strong> — you have the same page open multiple times:
+        ${duplicateTabs.map(d => `<span class="page-chip" style="margin-top:6px;display:inline-block">${(d.title || d.url).slice(0, 45)} (${d.count}x)</span>`).join(' ')}
+      </div>
+    `;
+  } else if (dupeSection) {
+    dupeSection.style.display = 'none';
   }
 
   // ── Step 3: Fetch history missions ("Pick back up") ──────────────────────
