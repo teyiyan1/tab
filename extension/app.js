@@ -43,9 +43,9 @@ async function fetchOpenTabs() {
       id:       t.id,
       url:      t.url,
       title:    t.title,
+      favIconUrl: t.favIconUrl || '',
       windowId: t.windowId,
       active:   t.active,
-      // Flag Tab Out's own pages so we can detect duplicate new tabs
       isTabOut: t.url === newtabUrl || t.url === 'chrome://newtab/',
     }));
   } catch {
@@ -492,13 +492,14 @@ function timeAgo(dateStr) {
 }
 
 /**
- * getGreeting() — "Good morning / afternoon / evening"
+ * getGreeting() — "Good morning / afternoon / evening, tete"
  */
 function getGreeting() {
   const hour = new Date().getHours();
-  if (hour < 12) return 'Good morning';
-  if (hour < 17) return 'Good afternoon';
-  return 'Good evening';
+  const name = 'tete';
+  if (hour < 12) return `Good morning, ${name}`;
+  if (hour < 17) return `Good afternoon, ${name}`;
+  return `Good evening, ${name}`;
 }
 
 /**
@@ -767,7 +768,7 @@ function buildOverflowChips(hiddenTabs, urlCounts = {}) {
     const safeTitle = label.replace(/"/g, '&quot;');
     let domain = '';
     try { domain = new URL(tab.url).hostname; } catch {}
-    const faviconUrl = domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=16` : '';
+    const faviconUrl = tab.favIconUrl || (domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=16` : '');
     return `<div class="page-chip clickable${chipClass}" data-action="focus-tab" data-tab-url="${safeUrl}" title="${safeTitle}">
       ${faviconUrl ? `<img class="chip-favicon" src="${faviconUrl}" alt="" onerror="this.style.display='none'">` : ''}
       <span class="chip-text">${label}</span>${dupeTag}
@@ -831,24 +832,21 @@ function renderDomainCard(group) {
     if (!seen.has(tab.url)) { seen.add(tab.url); uniqueTabs.push(tab); }
   }
 
-  const visibleTabs = uniqueTabs.slice(0, 8);
-  const extraCount  = uniqueTabs.length - visibleTabs.length;
-
-  const pageChips = visibleTabs.map(tab => {
+  // Helper: render one chip row
+  function makeChipHtml(tab) {
     let label = cleanTitle(smartTitle(stripTitleNoise(tab.title || ''), tab.url), group.domain);
-    // For localhost tabs, prepend port number so you can tell projects apart
     try {
       const parsed = new URL(tab.url);
       if (parsed.hostname === 'localhost' && parsed.port) label = `${parsed.port} ${label}`;
     } catch {}
-    const count    = urlCounts[tab.url];
-    const dupeTag  = count > 1 ? ` <span class="chip-dupe-badge">(${count}x)</span>` : '';
+    const count     = urlCounts[tab.url];
+    const dupeTag   = count > 1 ? ` <span class="chip-dupe-badge">(${count}x)</span>` : '';
     const chipClass = count > 1 ? ' chip-has-dupes' : '';
     const safeUrl   = (tab.url || '').replace(/"/g, '&quot;');
     const safeTitle = label.replace(/"/g, '&quot;');
     let domain = '';
     try { domain = new URL(tab.url).hostname; } catch {}
-    const faviconUrl = domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=16` : '';
+    const faviconUrl = tab.favIconUrl || (domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=16` : '');
     return `<div class="page-chip clickable${chipClass}" data-action="focus-tab" data-tab-url="${safeUrl}" title="${safeTitle}">
       ${faviconUrl ? `<img class="chip-favicon" src="${faviconUrl}" alt="" onerror="this.style.display='none'">` : ''}
       <span class="chip-text">${label}</span>${dupeTag}
@@ -861,7 +859,31 @@ function renderDomainCard(group) {
         </button>
       </div>
     </div>`;
-  }).join('') + (extraCount > 0 ? buildOverflowChips(uniqueTabs.slice(8), urlCounts) : '');
+  }
+
+  // Helper: render a list of tabs as chips (up to 8 visible, rest overflow)
+  function renderChipList(tabList) {
+    const visible = tabList.slice(0, 8);
+    const extra   = tabList.length - visible.length;
+    return visible.map(makeChipHtml).join('') +
+      (extra > 0 ? buildOverflowChips(tabList.slice(8), urlCounts) : '');
+  }
+
+  // Split uniqueTabs into ungrouped vs sub-groups
+  const ungroupedTabs = uniqueTabs.filter(t => !t.subGroup);
+  const subGroupMap   = {};
+  for (const tab of uniqueTabs) {
+    if (tab.subGroup) {
+      if (!subGroupMap[tab.subGroup]) subGroupMap[tab.subGroup] = [];
+      subGroupMap[tab.subGroup].push(tab);
+    }
+  }
+
+  let pageChips = renderChipList(ungroupedTabs);
+  for (const [name, subTabs] of Object.entries(subGroupMap)) {
+    pageChips += `<div class="subgroup-label">${name} <span class="subgroup-count">${subTabs.length}</span></div>`;
+    pageChips += renderChipList(subTabs);
+  }
 
   let actionsHtml = `
     <button class="action-btn close-tabs" data-action="close-domain-tabs" data-domain-id="${stableId}">
@@ -966,7 +988,7 @@ async function renderDeferredColumn() {
 function renderDeferredItem(item) {
   let domain = '';
   try { domain = new URL(item.url).hostname.replace(/^www\./, ''); } catch {}
-  const faviconUrl = `https://www.google.com/s2/favicons?domain=${domain}&sz=16`;
+  const faviconUrl = `https://icons.duckduckgo.com/ip3/${domain}.ico`;
   const ago = timeAgo(item.savedAt);
 
   return `
@@ -1099,7 +1121,7 @@ async function renderStaticDashboard() {
       if (customRule) {
         const key = customRule.groupKey;
         if (!groupMap[key]) groupMap[key] = { domain: key, label: customRule.groupLabel, tabs: [] };
-        groupMap[key].tabs.push(tab);
+        groupMap[key].tabs.push({ ...tab, subGroup: customRule.subGroup || null });
         continue;
       }
 
@@ -1349,6 +1371,15 @@ document.addEventListener('click', async (e) => {
     if (!group) return;
 
     const urls      = group.tabs.map(t => t.url);
+    const groupLabel = group.domain === '__landing-pages__' ? 'Homepages' : (group.label || friendlyDomain(group.domain));
+
+    const ok = await showConfirm(
+      `Close ${groupLabel}?`,
+      `This will close all ${urls.length} tab${urls.length !== 1 ? 's' : ''} in this group.`,
+      `Close ${urls.length} tab${urls.length !== 1 ? 's' : ''}`
+    );
+    if (!ok) return;
+
     // Landing pages and custom groups (whose domain key isn't a real hostname)
     // must use exact URL matching to avoid closing unrelated tabs
     const useExact  = group.domain === '__landing-pages__' || !!group.label;
@@ -1368,7 +1399,6 @@ document.addEventListener('click', async (e) => {
     const idx = domainGroups.indexOf(group);
     if (idx !== -1) domainGroups.splice(idx, 1);
 
-    const groupLabel = group.domain === '__landing-pages__' ? 'Homepages' : (group.label || friendlyDomain(group.domain));
     showToast(`Closed ${urls.length} tab${urls.length !== 1 ? 's' : ''} from ${groupLabel}`);
 
     const statTabs = document.getElementById('statTabs');
@@ -1417,6 +1447,14 @@ document.addEventListener('click', async (e) => {
     const allUrls = openTabs
       .filter(t => t.url && !t.url.startsWith('chrome') && !t.url.startsWith('about:'))
       .map(t => t.url);
+
+    const ok = await showConfirm(
+      'Close all tabs?',
+      `This will close all ${allUrls.length} open tabs across all groups. This can't be undone.`,
+      `Close all ${allUrls.length} tabs`
+    );
+    if (!ok) return;
+
     await closeTabsByUrls(allUrls);
     playCloseSound();
 
@@ -1477,6 +1515,66 @@ document.addEventListener('input', async (e) => {
 
 
 /* ----------------------------------------------------------------
+   CONFIRM MODAL
+   ---------------------------------------------------------------- */
+
+let confirmResolve = null;
+
+function showConfirm(title, body, confirmLabel = 'Close tabs') {
+  return new Promise(resolve => {
+    confirmResolve = resolve;
+    document.getElementById('confirmTitle').textContent  = title;
+    document.getElementById('confirmBody').textContent   = body;
+    document.getElementById('confirmOk').textContent     = confirmLabel;
+    document.getElementById('confirmModal').style.display = 'flex';
+  });
+}
+
+function closeConfirm(result) {
+  document.getElementById('confirmModal').style.display = 'none';
+  if (confirmResolve) { confirmResolve(result); confirmResolve = null; }
+}
+
+document.getElementById('confirmOk')?.addEventListener('click',     () => closeConfirm(true));
+document.getElementById('confirmCancel')?.addEventListener('click',  () => closeConfirm(false));
+document.getElementById('confirmModal')?.addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeConfirm(false);
+});
+
+/* ----------------------------------------------------------------
+   THEME — dark / light toggle, persisted in chrome.storage.local
+   ---------------------------------------------------------------- */
+
+async function initTheme() {
+  try {
+    const { theme } = await chrome.storage.local.get('theme');
+    if (theme === 'dark' || theme === 'light') {
+      document.documentElement.setAttribute('data-theme', theme);
+    }
+  } catch { /* storage unavailable, fall back to system */ }
+}
+
+async function toggleTheme() {
+  const current = document.documentElement.getAttribute('data-theme');
+  const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+  let next;
+  if (current === 'dark') {
+    next = 'light';
+  } else if (current === 'light') {
+    next = 'dark';
+  } else {
+    // No manual override yet — flip from system default
+    next = systemDark ? 'light' : 'dark';
+  }
+
+  document.documentElement.setAttribute('data-theme', next);
+  try { await chrome.storage.local.set({ theme: next }); } catch {}
+}
+
+document.getElementById('themeToggle')?.addEventListener('click', toggleTheme);
+
+/* ----------------------------------------------------------------
    INITIALIZE
    ---------------------------------------------------------------- */
-renderDashboard();
+initTheme().then(() => renderDashboard());
