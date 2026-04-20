@@ -13,7 +13,7 @@ No server. No account. No external API calls. Just a Chrome extension.
 Send your coding agent (Claude Code, Codex, etc.) this repo and say **"install this"**:
 
 ```
-https://github.com/zarazhangrui/tab-out
+github.com/teyiyan1/tab
 ```
 
 The agent will walk you through it. Takes about 1 minute.
